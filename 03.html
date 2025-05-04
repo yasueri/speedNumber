@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>数字スピードゲーム</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0;
+        }
+        .game-container {
+            width: 100%;
+            height: 100px;
+            border: 2px solid #333;
+            position: relative;
+            overflow: hidden;
+            background-color: #fff;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
+            margin: 0 auto;
+        }
+        .number {
+            position: absolute;
+            font-size: 36px;
+            font-weight: bold;
+            color: #333;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            line-height: 1; /* 行の高さを調整 */
+            text-shadow: 0 0 3px #fff, 0 0 5px #fff; /* テキストに白い影をつけて読みやすく */
+            white-space: nowrap; /* 数字が折り返されないようにする */
+        }
+        .controls {
+            margin-top: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .input-area {
+            margin: 10px 0;
+        }
+        input {
+            font-size: 24px;
+            padding: 5px;
+            width: 150px;
+            text-align: center;
+            border: 2px solid #333;
+            border-radius: 5px;
+        }
+        button {
+            margin: 5px;
+            padding: 10px 20px;
+            font-size: 16px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .level-control {
+            margin: 10px 0;
+        }
+        .countdown {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 120px;
+            font-weight: bold;
+            color: #e74c3c;
+            z-index: 10;
+            text-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
+            opacity: 0;
+            transition: opacity 0.2s;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            width: 100%;
+            height: 100%;
+        }
+        @keyframes pulse {
+            0% { transform: translate(-50%, -50%) scale(1); }
+            50% { transform: translate(-50%, -50%) scale(1.2); }
+            100% { transform: translate(-50%, -50%) scale(1); }
+        }
+    </style>
+</head>
+<body>
+    <h1>数字スピードゲーム</h1>
+    
+    <div class="game-container" id="gameContainer">
+        <!-- 数字はここに動的に表示されます -->
+    </div>
+    
+    <div class="controls">
+        <div>
+            <button id="startButton">スタート</button>
+            <button id="showAnswerButton">答え合わせ</button>
+        </div>
+        
+        <div class="level-control">
+            <span>速度: </span>
+            <select id="speedSelector">
+                <option value="1">時速300km (遅い)</option>
+                <option value="2">時速500km</option>
+                <option value="3" selected>時速1,000km (普通)</option>
+                <option value="4">音速 (マッハ1: 1,225km/h)</option>
+                <option value="5">マッハ2 (2,450km/h)</option>
+                <option value="7">マッハ3 (3,675km/h)</option>
+            </select>
+        </div>
+    </div>
+    
+    <div class="stats">
+        <p>答え: <span id="answerDisplay">-----</span></p>
+    </div>
+
+    <script>
+        // ゲームの状態を管理
+        const gameState = {
+            isRunning: false,
+            speed: 3, // デフォルトは時速1,000km (普通)
+            speedMultiplier: 15, // 実際の動作速度倍率
+            currentNumbers: [],
+            currentNumber: null, // 現在表示中の数字
+            animationFrameId: null,
+            lastNumberTime: 0, // 最後に数字を生成した時間
+            difficulty: 1.0 // 難易度係数
+        };
+
+        // DOM要素
+        const gameContainer = document.getElementById('gameContainer');
+        const startButton = document.getElementById('startButton');
+        const showAnswerButton = document.getElementById('showAnswerButton');
+        const speedSelector = document.getElementById('speedSelector');
+        const answerDisplay = document.getElementById('answerDisplay');
+
+        // コンテナサイズ
+        let containerWidth = gameContainer.offsetWidth;
+        // リサイズイベントでコンテナ幅を更新
+        window.addEventListener('resize', () => {
+            containerWidth = gameContainer.offsetWidth;
+        });
+
+        // 数字を生成して画面に追加
+        function createNumber() {
+            // ランダムな5桁の数字を生成
+            const number = Math.floor(10000 + Math.random() * 90000);
+            
+            // 数字の要素を作成
+            const numberElement = document.createElement('div');
+            numberElement.className = 'number';
+            numberElement.textContent = number;
+            
+            // 画面右から開始（枠の外側から）
+            const numberWidth = 150; // 数字の幅を推定
+            numberElement.style.right = `-${numberWidth}px`; 
+            numberElement.style.left = 'auto'; // leftをリセット
+            
+            // 枠の中央に正確に垂直配置
+            numberElement.style.top = '50%';
+            numberElement.style.transform = 'translateY(-50%)';
+            
+            // ゲームコンテナに追加
+            gameContainer.appendChild(numberElement);
+            
+            // 数字の状態を保存
+            gameState.currentNumbers.push({
+                element: numberElement,
+                value: number,
+                position: -numberWidth, // 右端からの位置（負の値）
+                speed: gameState.speedMultiplier, // 倍率に基づく速度
+                missed: false,
+                direction: 'rtl', // 右から左
+                width: numberWidth // 数字の幅
+            });
+            
+            // 現在の数字を記録（後で答え合わせ用）
+            gameState.currentNumber = number;
+        }
+
+        // ゲームループ
+        function gameLoop() {
+            // 全ての数字を移動
+            gameState.currentNumbers.forEach((numObj, index) => {
+                numObj.position += numObj.speed;
+                
+                // 右から左への移動
+                numObj.element.style.right = `${numObj.position}px`;
+                
+                // 画面外に出たら削除
+                if (numObj.position > containerWidth + numObj.width) {
+                    numObj.missed = true;
+                    
+                    // 削除
+                    if (numObj.element.parentNode) {
+                        gameContainer.removeChild(numObj.element);
+                    }
+                    gameState.currentNumbers.splice(index, 1);
+                    
+                    // 新しい数字を生成
+                    if (gameState.isRunning) {
+                        createNumber();
+                    }
+                }
+            });
+            
+            // ゲームが実行中なら次のフレームを予約
+            if (gameState.isRunning) {
+                gameState.animationFrameId = requestAnimationFrame(gameLoop);
+            }
+        }
+
+        // ゲーム開始
+        function startGame() {
+            if (gameState.isRunning) {
+                // 既に実行中なら一度停止してリセット
+                pauseGame();
+                resetGame();
+            }
+            
+            // カウントダウン開始
+            showCountdown(() => {
+                gameState.isRunning = true;
+                startButton.disabled = true;
+                showAnswerButton.disabled = false;
+                
+                // 最初の数字を生成
+                createNumber();
+                
+                // ゲームループ開始
+                gameState.animationFrameId = requestAnimationFrame(gameLoop);
+            });
+        }
+        
+        // カウントダウン表示
+        function showCountdown(callback) {
+            const countdownElement = document.createElement('div');
+            countdownElement.className = 'countdown';
+            gameContainer.appendChild(countdownElement);
+            
+            const counts = ['3', '2', '1', 'スタート！'];
+            let index = 0;
+            
+            function showNext() {
+                if (index < counts.length) {
+                    countdownElement.textContent = counts[index];
+                    countdownElement.style.opacity = '1';
+                    
+                    // スタート！の文字サイズを小さくする
+                    if (index === 3) {
+                        countdownElement.style.fontSize = '80px';
+                    } else {
+                        countdownElement.style.fontSize = '120px';
+                    }
+                    
+                    countdownElement.style.animation = 'pulse 0.45s ease-in-out'; // 2倍速に変更
+                    
+                    setTimeout(() => {
+                        countdownElement.style.opacity = '0';
+                        setTimeout(() => {
+                            index++;
+                            showNext();
+                        }, 50); // インターバルも短く
+                    }, 450); // 2倍速に変更（900msの半分）
+                } else {
+                    // カウントダウン終了、要素を削除
+                    gameContainer.removeChild(countdownElement);
+                    callback();
+                }
+            }
+            
+            showNext();
+        }
+
+        // ゲーム一時停止
+        function pauseGame() {
+            if (gameState.isRunning) {
+                gameState.isRunning = false;
+                startButton.disabled = false;
+                
+                if (gameState.animationFrameId) {
+                    cancelAnimationFrame(gameState.animationFrameId);
+                }
+            }
+        }
+
+        // リセット
+        function resetGame() {
+            // ゲームが実行中なら停止
+            if (gameState.isRunning) {
+                gameState.isRunning = false;
+                
+                if (gameState.animationFrameId) {
+                    cancelAnimationFrame(gameState.animationFrameId);
+                    gameState.animationFrameId = null;
+                }
+            }
+            
+            // 全ての数字を画面から削除
+            gameState.currentNumbers.forEach(numObj => {
+                if (numObj.element.parentNode) {
+                    gameContainer.removeChild(numObj.element);
+                }
+            });
+            
+            // ゲーム状態をリセット
+            gameState.currentNumbers = [];
+            gameState.currentNumber = null;
+            
+            // 表示を更新
+            answerDisplay.textContent = '-----';
+            
+            // ボタンの状態を更新
+            startButton.disabled = false;
+            
+            // 速度表示を更新
+            updateSpeedDisplay();
+        }
+
+        // 速度設定
+        function setSpeed(speed) {
+            gameState.speed = parseFloat(speed);
+            
+            // 実際の速度感に合わせて倍率を調整
+            const speedMultipliers = {
+                1: 5,    // 時速300km
+                2: 8,    // 時速500km
+                3: 15,   // 時速1,000km
+                4: 25,   // マッハ1
+                5: 40,   // マッハ2
+                7: 60    // マッハ3
+            };
+            
+            gameState.speedMultiplier = speedMultipliers[gameState.speed] || 15;
+            
+            updateSpeedDisplay();
+        }
+        
+        // 速度表示の更新
+        function updateSpeedDisplay() {
+            // 速度表示は削除済み
+        }
+
+        // イベントリスナー
+        startButton.addEventListener('click', () => {
+            answerDisplay.textContent = "-----"; // 答えをリセット
+            resetGame();
+            startGame();
+        });
+        
+        showAnswerButton.addEventListener('click', showAnswer);
+        
+        // 速度セレクターのイベントリスナー
+        document.getElementById('speedSelector').addEventListener('change', (e) => {
+            setSpeed(e.target.value);
+        });
+        
+        // 答え合わせ表示
+        function showAnswer() {
+            if (gameState.currentNumber) {
+                answerDisplay.textContent = gameState.currentNumber;
+                
+                // 一度答えを見たらゲームを停止
+                if (gameState.isRunning) {
+                    pauseGame();
+                }
+            }
+        }
+        
+        // デフォルト速度を設定
+        setSpeed(3);
+    </script>
+</body>
+</html>
